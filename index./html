@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>간단한 WebXR AR 서비스</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            text-align: center;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            max-width: 500px;
+            width: 90%;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        .status {
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 8px;
+            font-weight: bold;
+        }
+
+        .supported {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .not-supported {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .warning {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+
+        button {
+            background: linear-gradient(45deg, #FF6B6B, #4ECDC4);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 16px;
+            border-radius: 25px;
+            cursor: pointer;
+            margin: 10px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .info {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #e3f2fd;
+            border-radius: 8px;
+            color: #1565c0;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .ar-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1000;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>🌟 WebXR AR 체험</h1>
+        
+        <div id="status" class="status">
+            WebXR 지원 여부를 확인 중...
+        </div>
+
+        <button id="startAR" disabled>AR 시작하기</button>
+        <button id="stopAR" disabled>AR 종료하기</button>
+
+        <div class="info">
+            <strong>📱 사용 방법:</strong><br>
+            1. HTTPS 환경에서 접속해주세요<br>
+            2. AR 지원 브라우저 필요 (Chrome, Edge 등)<br>
+            3. 카메라 권한을 허용해주세요<br>
+            4. AR 시작 후 화면을 터치하여 3D 객체를 배치할 수 있습니다
+        </div>
+    </div>
+
+    <script>
+        class SimpleARApp {
+            constructor() {
+                this.scene = null;
+                this.camera = null;
+                this.renderer = null;
+                this.xrSession = null;
+                this.xrRefSpace = null;
+                this.hitTestSource = null;
+                this.reticle = null;
+                this.objects = [];
+                
+                this.init();
+            }
+
+            async init() {
+                await this.checkWebXRSupport();
+                this.setupEventListeners();
+            }
+
+            async checkWebXRSupport() {
+                const statusEl = document.getElementById('status');
+                const startBtn = document.getElementById('startAR');
+
+                if (!navigator.xr) {
+                    statusEl.textContent = '❌ WebXR이 지원되지 않는 브라우저입니다';
+                    statusEl.className = 'status not-supported';
+                    return;
+                }
+
+                try {
+                    const isSupported = await navigator.xr.isSessionSupported('immersive-ar');
+                    if (isSupported) {
+                        statusEl.textContent = '✅ AR이 지원됩니다!';
+                        statusEl.className = 'status supported';
+                        startBtn.disabled = false;
+                    } else {
+                        statusEl.textContent = '⚠️ AR이 지원되지 않는 기기입니다';
+                        statusEl.className = 'status warning';
+                    }
+                } catch (error) {
+                    statusEl.textContent = '❌ WebXR 확인 중 오류가 발생했습니다';
+                    statusEl.className = 'status not-supported';
+                }
+            }
+
+            setupEventListeners() {
+                document.getElementById('startAR').addEventListener('click', () => this.startAR());
+                document.getElementById('stopAR').addEventListener('click', () => this.stopAR());
+            }
+
+            async startAR() {
+                try {
+                    // WebXR 세션 요청
+                    this.xrSession = await navigator.xr.requestSession('immersive-ar', {
+                        requiredFeatures: ['hit-test'],
+                        optionalFeatures: ['dom-overlay'],
+                        domOverlay: { root: document.body }
+                    });
+
+                    // Three.js 설정
+                    this.setupThreeJS();
+                    
+                    // XR 세션 설정
+                    await this.setupXRSession();
+
+                    // UI 업데이트
+                    document.querySelector('.container').style.display = 'none';
+                    document.getElementById('stopAR').disabled = false;
+
+                } catch (error) {
+                    console.error('AR 시작 실패:', error);
+                    alert('AR을 시작할 수 없습니다. HTTPS 환경과 카메라 권한을 확인해주세요.');
+                }
+            }
+
+            setupThreeJS() {
+                // Scene 생성
+                this.scene = new THREE.Scene();
+
+                // Renderer 생성
+                this.renderer = new THREE.WebGLRenderer({ 
+                    antialias: true, 
+                    alpha: true 
+                });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.xr.enabled = true;
+                this.renderer.xr.setReferenceSpaceType('local');
+                
+                document.body.appendChild(this.renderer.domElement);
+
+                // 조명 추가
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+                this.scene.add(ambientLight);
+                
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight.position.set(0, 10, 5);
+                this.scene.add(directionalLight);
+
+                // Reticle (조준점) 생성
+                this.createReticle();
+            }
+
+            createReticle() {
+                const geometry = new THREE.RingGeometry(0.02, 0.04, 32);
+                const material = new THREE.MeshBasicMaterial({
+                    color: 0xffffff,
+                    transparent: true,
+                    opacity: 0.8
+                });
+                this.reticle = new THREE.Mesh(geometry, material);
+                this.reticle.matrixAutoUpdate = false;
+                this.reticle.visible = false;
+                this.scene.add(this.reticle);
+            }
+
+            async setupXRSession() {
+                // Reference space 설정
+                this.xrRefSpace = await this.xrSession.requestReferenceSpace('local');
+                
+                // Hit test source 설정
+                const viewerSpace = await this.xrSession.requestReferenceSpace('viewer');
+                this.hitTestSource = await this.xrSession.requestHitTestSource({ space: viewerSpace });
+
+                // 렌더링 시작
+                this.renderer.xr.setSession(this.xrSession);
+
+                // 이벤트 리스너 추가
+                this.xrSession.addEventListener('select', (event) => this.onSelect(event));
+                this.xrSession.addEventListener('end', () => this.onSessionEnd());
+
+                // 렌더링 루프 시작
+                this.renderer.setAnimationLoop((timestamp, frame) => this.render(timestamp, frame));
+            }
+
+            render(timestamp, frame) {
+                if (frame && this.hitTestSource) {
+                    // Hit test 수행
+                    const hitTestResults = frame.getHitTestResults(this.hitTestSource);
+                    
+                    if (hitTestResults.length > 0) {
+                        const hit = hitTestResults[0];
+                        const pose = hit.getPose(this.xrRefSpace);
+                        
+                        // Reticle 위치 업데이트
+                        this.reticle.visible = true;
+                        this.reticle.matrix.fromArray(pose.transform.matrix);
+                    } else {
+                        this.reticle.visible = false;
+                    }
+                }
+
+                // 객체들 회전 애니메이션
+                this.objects.forEach((obj, index) => {
+                    obj.rotation.y += 0.01 * (index + 1);
+                });
+
+                this.renderer.render(this.scene, this.camera);
+            }
+
+            onSelect(event) {
+                if (this.reticle.visible) {
+                    // 3D 객체 생성 및 배치
+                    const object = this.createRandomObject();
+                    object.position.setFromMatrixPosition(this.reticle.matrix);
+                    object.position.y += 0.1; // 약간 위로 올리기
+                    
+                    this.scene.add(object);
+                    this.objects.push(object);
+                }
+            }
+
+            createRandomObject() {
+                const geometries = [
+                    new THREE.BoxGeometry(0.1, 0.1, 0.1),
+                    new THREE.SphereGeometry(0.05, 16, 16),
+                    new THREE.ConeGeometry(0.05, 0.1, 8),
+                    new THREE.CylinderGeometry(0.05, 0.05, 0.1, 8)
+                ];
+
+                const colors = [0xff6b6b, 0x4ecdc4, 0x45b7d1, 0xf9ca24, 0xf0932b, 0xeb4d4b, 0x6c5ce7];
+                
+                const geometry = geometries[Math.floor(Math.random() * geometries.length)];
+                const color = colors[Math.floor(Math.random() * colors.length)];
+                
+                const material = new THREE.MeshPhongMaterial({ 
+                    color: color,
+                    shininess: 100
+                });
+                
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.scale.set(1, 1, 1);
+                
+                return mesh;
+            }
+
+            stopAR() {
+                if (this.xrSession) {
+                    this.xrSession.end();
+                }
+            }
+
+            onSessionEnd() {
+                // 정리 작업
+                if (this.renderer && this.renderer.domElement) {
+                    document.body.removeChild(this.renderer.domElement);
+                }
+
+                // 변수 초기화
+                this.xrSession = null;
+                this.renderer = null;
+                this.scene = null;
+                this.objects = [];
+
+                // UI 복원
+                document.querySelector('.container').style.display = 'flex';
+                document.getElementById('stopAR').disabled = true;
+                document.getElementById('startAR').disabled = false;
+            }
+        }
+
+        // 앱 시작
+        window.addEventListener('DOMContentLoaded', () => {
+            new SimpleARApp();
+        });
+
+        // 화면 크기 변경 처리
+        window.addEventListener('resize', () => {
+            if (window.arApp && window.arApp.renderer) {
+                window.arApp.renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+        });
+    </script>
+</body>
+</html>
