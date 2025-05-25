@@ -1,0 +1,38 @@
+body {
+    background-color: #f8f9fa;
+}
+
+.message-list {
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+.message-card {
+    background-color: white;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 15px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    transition: transform 0.2s;
+}
+
+.message-card:hover {
+    transform: translateY(-2px);
+}
+
+.message-content {
+    font-size: 1.1rem;
+    margin-bottom: 10px;
+}
+
+.message-time {
+    color: #6c757d;
+    font-size: 0.9rem;
+}
+
+#messageForm {
+    background-color: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+} 
